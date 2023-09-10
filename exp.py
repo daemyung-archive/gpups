@@ -43,12 +43,12 @@ def base(
     )
 
     x = tl.load(x_block_ptr, boundary_check=(0,))
-    y = x * x * x
+    y = tl.exp(x)
     tl.store(y_block_ptr, y, boundary_check=(0,))
 
 
 @triton.jit
-def powi3(
+def exp(
     y_ptr: tl.tensor,
     x_ptr: tl.tensor,
     x_size: tl.int32,
@@ -72,12 +72,12 @@ def powi3(
     )
 
     x = tl.load(x_block_ptr, boundary_check=(0,))
-    y = tl.math.pow(x.to(tl.float32), 3).to(x.dtype)
+    y = tl.math.exp(x)
     tl.store(y_block_ptr, y, boundary_check=(0,))
 
 
 @triton.jit
-def powf3(
+def fast_expf(
     y_ptr: tl.tensor,
     x_ptr: tl.tensor,
     x_size: tl.int32,
@@ -101,36 +101,7 @@ def powf3(
     )
 
     x = tl.load(x_block_ptr, boundary_check=(0,))
-    y = tl.math.pow(x, 3.0).to(x.dtype)
-    tl.store(y_block_ptr, y, boundary_check=(0,))
-
-
-@triton.jit
-def fast_pow3(
-    y_ptr: tl.tensor,
-    x_ptr: tl.tensor,
-    x_size: tl.int32,
-    block_size: tl.constexpr,
-):
-    y_block_ptr = tl.make_block_ptr(
-        y_ptr,
-        shape=(x_size,),
-        strides=(1,),
-        offsets=(0,),
-        block_shape=(block_size,),
-        order=(0,),
-    )
-    x_block_ptr = tl.make_block_ptr(
-        x_ptr,
-        shape=(x_size,),
-        strides=(1,),
-        offsets=(0,),
-        block_shape=(block_size,),
-        order=(0,),
-    )
-
-    x = tl.load(x_block_ptr, boundary_check=(0,))
-    y = tl.math.fast_powf(x.to(tl.float32), 3.0).to(x.dtype)
+    y = tl.math.fast_expf(x)
     tl.store(y_block_ptr, y, boundary_check=(0,))
 
 
@@ -142,14 +113,12 @@ def verify_result():
     factory_kwargs = {"device": "cuda", "dtype": torch.float32}
     x = torch.rand(10, **factory_kwargs)
     y = torch.rand(10, **factory_kwargs)
-    z = x * x * x
+    z = torch.exp(x)
     dispatch(base, y, x)
     torch.allclose(z, y)
-    dispatch(powi3, y, x)
+    dispatch(exp, y, x)
     torch.allclose(z, y)
-    dispatch(powf3, y, x)
-    torch.allclose(z, y)
-    dispatch(fast_pow3, y, x)
+    dispatch(fast_expf, y, x)
     torch.allclose(z, y)
 
 
@@ -159,10 +128,10 @@ def verify_result():
             x_names=["x_size"],
             x_vals=[256 * i for i in range(1, 31, 1)],
             line_arg="backend",
-            line_vals=["torch", "base", "powi3", "powf3", "fast_powf3"],
-            line_names=["torch", "base", "powi3", "powf3", "fast_powf3"],
+            line_vals=["torch", "base", "exp", "fast_exp"],
+            line_names=["torch", "base", "exp", "fast_exp"],
             ylabel="milliseconds",
-            plot_name="pow3",
+            plot_name="exp",
             args={"dtype": torch.float32},
         )
     ]
@@ -173,15 +142,13 @@ def benchmark(x_size, dtype, backend):
     y = torch.empty_like(x)
 
     if backend == "torch":
-        return triton.testing.do_bench_cudagraph(lambda: x * x * x)
+        return triton.testing.do_bench_cudagraph(lambda: torch.exp(x))
     elif backend == "base":
         return triton.testing.do_bench_cudagraph(lambda: dispatch(base, y, x))
-    elif backend == "powi3":
-        return triton.testing.do_bench_cudagraph(lambda: dispatch(powi3, y, x))
-    elif backend == "powf3":
-        return triton.testing.do_bench_cudagraph(lambda: dispatch(powf3, y, x))
+    elif backend == "exp":
+        return triton.testing.do_bench_cudagraph(lambda: dispatch(exp, y, x))
     else:
-        return triton.testing.do_bench_cudagraph(lambda: dispatch(fast_pow3, y, x))
+        return triton.testing.do_bench_cudagraph(lambda: dispatch(fast_expf, y, x))
 
 
 def main():
